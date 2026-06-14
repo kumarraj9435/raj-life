@@ -47,6 +47,32 @@ const lsSet = (key, value) => {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 };
 
+const dataHasContent = (d) => {
+  if (!d) return false;
+  return (
+    (d.finance?.income?.length      > 0) ||
+    (d.finance?.expenses?.length    > 0) ||
+    (d.finance?.loans?.length       > 0) ||
+    (d.finance?.otherIncome?.length > 0) ||
+    (d.tasks?.length                > 0) ||
+    (d.goals?.length                > 0) ||
+    (d.payments?.length             > 0)
+  );
+};
+
+const sheetHasContent = (s) => {
+  if (!s) return false;
+  return (
+    (s.income?.length      > 0) ||
+    (s.expenses?.length    > 0) ||
+    (s.loans?.length       > 0) ||
+    (s.otherIncome?.length > 0) ||
+    (s.tasks?.length       > 0) ||
+    (s.goals?.length       > 0) ||
+    (s.payments?.length    > 0)
+  );
+};
+
 export function AppProvider({ children }) {
   const [data, setData] = useState(() => lsGet(LS_DATA_KEY, defaultData));
   const [currentMonth, setCurrentMonth] = useState(
@@ -133,7 +159,7 @@ export function AppProvider({ children }) {
     today.setHours(0, 0, 0, 0);
     const threeDaysLater = new Date(today);
     threeDaysLater.setDate(threeDaysLater.getDate() + 3);
-    const upcoming = data.payments.filter(p => {
+    const upcoming = (data.payments || []).filter(p => {
       if (p.done) return false;
       const payDate = new Date(p.dueDate);
       payDate.setHours(0, 0, 0, 0);
@@ -144,7 +170,7 @@ export function AppProvider({ children }) {
 
   const loadBirthdays = async () => {
     const bdays = await getAllBirthdays();
-    if (bdays) {
+    if (bdays && bdays.length > 0) {
       setData(prev => {
         const updated = { ...prev, birthdays: bdays };
         lsSet(LS_DATA_KEY, updated);
@@ -159,8 +185,26 @@ export function AppProvider({ children }) {
     setSyncError(null);
     try {
       const targetMonth = (month || currentMonth).trim();
+      console.log('Syncing month:', targetMonth);
       const sheetData = await getAllData(targetMonth);
+      console.log('Sheet data received:', sheetData);
+
       if (sheetData) {
+        const sheetHasData = sheetHasContent(sheetData);
+        const cachedData   = lsGet(LS_DATA_KEY, null);
+        const cacheHasData = dataHasContent(cachedData);
+
+        // Agar sheet bilkul empty hai lekin cache mein data hai
+        // toh cache ko overwrite mat karo — Google Script ka glitch ho sakta hai
+        if (!sheetHasData && cacheHasData) {
+          console.warn('Sheet empty but cache has data — keeping cache');
+          setSyncError(null);
+          setLastSynced(new Date().toLocaleTimeString('en-IN'));
+          setSyncing(false);
+          return;
+        }
+
+        // Normal case — sheet mein data hai, update karo
         setData(prev => {
           const updated = {
             ...prev,
@@ -182,10 +226,12 @@ export function AppProvider({ children }) {
         setLastSynced(new Date().toLocaleTimeString('en-IN'));
         setSyncError(null);
       } else {
-        setSyncError('Could not load data from sheet. Showing cached data.');
+        // Sheet ne null diya — cache rakhlo
+        console.warn('Sheet returned null — keeping cached data');
+        setSyncError('Cached data dikh raha hai (sheet se connect nahi hua)');
       }
     } catch (err) {
-      setSyncError('Sync failed. Showing cached data.');
+      setSyncError('Sync failed. Cached data dikh raha hai.');
       console.error('Sync error:', err);
     }
     setSyncing(false);
