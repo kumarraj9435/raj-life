@@ -43,16 +43,12 @@ export function AppProvider({ children }) {
   const [passwordLoaded, setPasswordLoaded] = useState(false);
   const [reminders, setReminders] = useState([]);
   const [birthdayReminders, setBirthdayReminders] = useState([]);
-  // FIX: Loading state to prevent black screen
   const [isInitializing, setIsInitializing] = useState(false);
 
-  // Load password from Google Sheets on app start
   useEffect(() => {
     const loadPassword = async () => {
       const sheetPass = await getPasswordFromSheet();
-      if (sheetPass) {
-        setPassword(sheetPass);
-      }
+      if (sheetPass) setPassword(sheetPass);
       setPasswordLoaded(true);
     };
     loadPassword();
@@ -71,7 +67,6 @@ export function AppProvider({ children }) {
     return false;
   };
 
-  // Initial setup & sync from Google Sheets — FIX: proper loading state
   useEffect(() => {
     if (!isLocked) {
       const init = async () => {
@@ -81,7 +76,6 @@ export function AppProvider({ children }) {
           await syncFromSheet();
           const months = await getAvailableMonths();
           if (months && months.length > 0) setAvailableMonths(months);
-          // Load birthdays (separate from monthly data)
           await loadBirthdays();
         } catch (err) {
           console.error('Init error:', err);
@@ -93,24 +87,15 @@ export function AppProvider({ children }) {
     }
   }, [isLocked]);
 
-  // Birthday reminders — check every time birthdays change
   useEffect(() => {
     const today = new Date();
-    const todayMonth = today.getMonth() + 1;
-    const todayDay = today.getDate();
-
     const upcoming = (data.birthdays || []).filter(b => {
       if (!b.date) return false;
       const parts = b.date.split('-');
       let month, day;
-      if (parts.length >= 3) {
-        month = parseInt(parts[1]);
-        day = parseInt(parts[2]);
-      } else if (parts.length === 2) {
-        month = parseInt(parts[0]);
-        day = parseInt(parts[1]);
-      } else return false;
-
+      if (parts.length >= 3) { month = parseInt(parts[1]); day = parseInt(parts[2]); }
+      else if (parts.length === 2) { month = parseInt(parts[0]); day = parseInt(parts[1]); }
+      else return false;
       const thisYear = today.getFullYear();
       let bday = new Date(thisYear, month - 1, day);
       if (bday < today) bday = new Date(thisYear + 1, month - 1, day);
@@ -120,13 +105,11 @@ export function AppProvider({ children }) {
     setBirthdayReminders(upcoming);
   }, [data.birthdays]);
 
-  // Payment reminders
   useEffect(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const threeDaysLater = new Date(today);
     threeDaysLater.setDate(threeDaysLater.getDate() + 3);
-
     const upcoming = data.payments.filter(p => {
       if (p.done) return false;
       const payDate = new Date(p.dueDate);
@@ -138,17 +121,17 @@ export function AppProvider({ children }) {
 
   const loadBirthdays = async () => {
     const bdays = await getAllBirthdays();
-    if (bdays) {
-      setData(prev => ({ ...prev, birthdays: bdays }));
-    }
+    if (bdays) setData(prev => ({ ...prev, birthdays: bdays }));
   };
 
   const syncFromSheet = useCallback(async (month) => {
     setSyncing(true);
     setSyncError(null);
     try {
-      const targetMonth = month || currentMonth;
+      const targetMonth = (month || currentMonth).trim();
+      console.log('Syncing month:', targetMonth);
       const sheetData = await getAllData(targetMonth);
+      console.log('Sheet data received:', sheetData);
       if (sheetData) {
         setData(prev => ({
           ...prev,
@@ -176,27 +159,25 @@ export function AppProvider({ children }) {
   }, [currentMonth]);
 
   const changeMonth = async (month) => {
-    setCurrentMonth(month);
-    await syncFromSheet(month);
+    const trimmedMonth = month.trim();
+    setCurrentMonth(trimmedMonth);
+    await syncFromSheet(trimmedMonth);
   };
 
   const handleCreateMonth = async (month) => {
-    await createNewMonth(month);
+    const trimmedMonth = month.trim();
+    await createNewMonth(trimmedMonth);
     const months = await getAvailableMonths();
     if (months) setAvailableMonths(months);
-    setCurrentMonth(month);
-    await syncFromSheet(month);
+    setCurrentMonth(trimmedMonth);
+    await syncFromSheet(trimmedMonth);
   };
 
-  // Finance Functions
   const addFinanceItem = async (category, item) => {
     const newItem = { ...item, id: Date.now(), createdAt: new Date().toISOString(), month: currentMonth };
     setData(prev => ({
       ...prev,
-      finance: {
-        ...prev.finance,
-        [category]: [...prev.finance[category], newItem]
-      }
+      finance: { ...prev.finance, [category]: [...prev.finance[category], newItem] }
     }));
     await addItemToSheet(category, item, currentMonth);
   };
@@ -204,15 +185,11 @@ export function AppProvider({ children }) {
   const deleteFinanceItem = async (category, id) => {
     setData(prev => ({
       ...prev,
-      finance: {
-        ...prev.finance,
-        [category]: prev.finance[category].filter(item => item.id !== id)
-      }
+      finance: { ...prev.finance, [category]: prev.finance[category].filter(item => item.id !== id) }
     }));
     await deleteItemFromSheet(category, id);
   };
 
-  // Task Functions
   const addTask = async (task) => {
     const newTask = { ...task, id: Date.now(), done: false, createdAt: new Date().toISOString(), month: currentMonth };
     setData(prev => ({ ...prev, tasks: [...prev.tasks, newTask] }));
@@ -236,7 +213,6 @@ export function AppProvider({ children }) {
     await deleteItemFromSheet('tasks', id);
   };
 
-  // Goal Functions
   const addGoal = async (goal) => {
     const newGoal = { ...goal, id: Date.now(), done: false, progress: 0, createdAt: new Date().toISOString(), month: currentMonth };
     setData(prev => ({ ...prev, goals: [...prev.goals, newGoal] }));
@@ -273,7 +249,6 @@ export function AppProvider({ children }) {
     await deleteItemFromSheet('goals', id);
   };
 
-  // Payment Functions
   const addPayment = async (payment) => {
     const newPayment = { ...payment, id: Date.now(), done: false, createdAt: new Date().toISOString(), month: currentMonth };
     setData(prev => ({ ...prev, payments: [...prev.payments, newPayment] }));
@@ -297,7 +272,6 @@ export function AppProvider({ children }) {
     await deleteItemFromSheet('payments', id);
   };
 
-  // Birthday Functions
   const addBirthday = async (birthday) => {
     const newBirthday = { ...birthday, id: Date.now(), createdAt: new Date().toISOString() };
     setData(prev => ({ ...prev, birthdays: [...(prev.birthdays || []), newBirthday] }));
@@ -311,37 +285,12 @@ export function AppProvider({ children }) {
 
   return (
     <AppContext.Provider value={{
-      data,
-      currentMonth,
-      availableMonths,
-      syncing,
-      lastSynced,
-      syncError,
-      isLocked,
-      isInitializing,
-      reminders,
-      birthdayReminders,
-      password,
-      passwordLoaded,
-      unlock,
-      changePassword,
-      changeMonth,
-      handleCreateMonth,
-      syncFromSheet,
-      addFinanceItem,
-      deleteFinanceItem,
-      addTask,
-      toggleTask,
-      deleteTask,
-      addGoal,
-      updateGoalProgress,
-      toggleGoal,
-      deleteGoal,
-      addPayment,
-      togglePayment,
-      deletePayment,
-      addBirthday,
-      deleteBirthday
+      data, currentMonth, availableMonths, syncing, lastSynced, syncError,
+      isLocked, isInitializing, reminders, birthdayReminders, password, passwordLoaded,
+      unlock, changePassword, changeMonth, handleCreateMonth, syncFromSheet,
+      addFinanceItem, deleteFinanceItem, addTask, toggleTask, deleteTask,
+      addGoal, updateGoalProgress, toggleGoal, deleteGoal,
+      addPayment, togglePayment, deletePayment, addBirthday, deleteBirthday
     }}>
       {children}
     </AppContext.Provider>
