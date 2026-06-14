@@ -31,10 +31,30 @@ const defaultData = {
   birthdays: []
 };
 
+const LS_DATA_KEY   = 'rajlife_data';
+const LS_MONTH_KEY  = 'rajlife_month';
+const LS_MONTHS_KEY = 'rajlife_months';
+const LS_BDAYS_KEY  = 'rajlife_birthdays';
+
+const lsGet = (key, fallback = null) => {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : fallback;
+  } catch { return fallback; }
+};
+
+const lsSet = (key, value) => {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+};
+
 export function AppProvider({ children }) {
-  const [data, setData] = useState(defaultData);
-  const [currentMonth, setCurrentMonth] = useState(getCurrentMonth());
-  const [availableMonths, setAvailableMonths] = useState([getCurrentMonth()]);
+  const [data, setData] = useState(() => lsGet(LS_DATA_KEY, defaultData));
+  const [currentMonth, setCurrentMonth] = useState(
+    () => lsGet(LS_MONTH_KEY, getCurrentMonth())
+  );
+  const [availableMonths, setAvailableMonths] = useState(
+    () => lsGet(LS_MONTHS_KEY, [getCurrentMonth()])
+  );
   const [syncing, setSyncing] = useState(false);
   const [lastSynced, setLastSynced] = useState(null);
   const [syncError, setSyncError] = useState(null);
@@ -75,7 +95,10 @@ export function AppProvider({ children }) {
           await setupSheets();
           await syncFromSheet();
           const months = await getAvailableMonths();
-          if (months && months.length > 0) setAvailableMonths(months);
+          if (months && months.length > 0) {
+            setAvailableMonths(months);
+            lsSet(LS_MONTHS_KEY, months);
+          }
           await loadBirthdays();
         } catch (err) {
           console.error('Init error:', err);
@@ -121,7 +144,14 @@ export function AppProvider({ children }) {
 
   const loadBirthdays = async () => {
     const bdays = await getAllBirthdays();
-    if (bdays) setData(prev => ({ ...prev, birthdays: bdays }));
+    if (bdays) {
+      setData(prev => {
+        const updated = { ...prev, birthdays: bdays };
+        lsSet(LS_DATA_KEY, updated);
+        return updated;
+      });
+      lsSet(LS_BDAYS_KEY, bdays);
+    }
   };
 
   const syncFromSheet = useCallback(async (month) => {
@@ -129,30 +159,33 @@ export function AppProvider({ children }) {
     setSyncError(null);
     try {
       const targetMonth = (month || currentMonth).trim();
-      console.log('Syncing month:', targetMonth);
       const sheetData = await getAllData(targetMonth);
-      console.log('Sheet data received:', sheetData);
       if (sheetData) {
-        setData(prev => ({
-          ...prev,
-          finance: {
-            income: sheetData.income || [],
-            expenses: sheetData.expenses || [],
-            loans: sheetData.loans || [],
-            creditCards: sheetData.creditCards || [],
-            otherIncome: sheetData.otherIncome || []
-          },
-          tasks: sheetData.tasks || [],
-          goals: sheetData.goals || [],
-          payments: sheetData.payments || []
-        }));
+        setData(prev => {
+          const updated = {
+            ...prev,
+            finance: {
+              income:      sheetData.income      || [],
+              expenses:    sheetData.expenses    || [],
+              loans:       sheetData.loans       || [],
+              creditCards: sheetData.creditCards || [],
+              otherIncome: sheetData.otherIncome || []
+            },
+            tasks:    sheetData.tasks    || [],
+            goals:    sheetData.goals    || [],
+            payments: sheetData.payments || []
+          };
+          lsSet(LS_DATA_KEY, updated);
+          return updated;
+        });
+        lsSet(LS_MONTH_KEY, targetMonth);
         setLastSynced(new Date().toLocaleTimeString('en-IN'));
         setSyncError(null);
       } else {
-        setSyncError('Could not load data');
+        setSyncError('Could not load data from sheet. Showing cached data.');
       }
     } catch (err) {
-      setSyncError('Sync failed');
+      setSyncError('Sync failed. Showing cached data.');
       console.error('Sync error:', err);
     }
     setSyncing(false);
@@ -161,6 +194,7 @@ export function AppProvider({ children }) {
   const changeMonth = async (month) => {
     const trimmedMonth = month.trim();
     setCurrentMonth(trimmedMonth);
+    lsSet(LS_MONTH_KEY, trimmedMonth);
     await syncFromSheet(trimmedMonth);
   };
 
@@ -168,118 +202,178 @@ export function AppProvider({ children }) {
     const trimmedMonth = month.trim();
     await createNewMonth(trimmedMonth);
     const months = await getAvailableMonths();
-    if (months) setAvailableMonths(months);
+    if (months) {
+      setAvailableMonths(months);
+      lsSet(LS_MONTHS_KEY, months);
+    }
     setCurrentMonth(trimmedMonth);
+    lsSet(LS_MONTH_KEY, trimmedMonth);
     await syncFromSheet(trimmedMonth);
   };
 
   const addFinanceItem = async (category, item) => {
     const newItem = { ...item, id: Date.now(), createdAt: new Date().toISOString(), month: currentMonth };
-    setData(prev => ({
-      ...prev,
-      finance: { ...prev.finance, [category]: [...prev.finance[category], newItem] }
-    }));
+    setData(prev => {
+      const updated = {
+        ...prev,
+        finance: { ...prev.finance, [category]: [...prev.finance[category], newItem] }
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addItemToSheet(category, item, currentMonth);
   };
 
   const deleteFinanceItem = async (category, id) => {
-    setData(prev => ({
-      ...prev,
-      finance: { ...prev.finance, [category]: prev.finance[category].filter(item => item.id !== id) }
-    }));
+    setData(prev => {
+      const updated = {
+        ...prev,
+        finance: { ...prev.finance, [category]: prev.finance[category].filter(item => item.id !== id) }
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteItemFromSheet(category, id);
   };
 
   const addTask = async (task) => {
     const newTask = { ...task, id: Date.now(), done: false, createdAt: new Date().toISOString(), month: currentMonth };
-    setData(prev => ({ ...prev, tasks: [...prev.tasks, newTask] }));
+    setData(prev => {
+      const updated = { ...prev, tasks: [...prev.tasks, newTask] };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addItemToSheet('tasks', task, currentMonth);
   };
 
   const toggleTask = async (id) => {
     let newDone;
-    setData(prev => ({
-      ...prev,
-      tasks: prev.tasks.map(t => {
-        if (t.id === id) { newDone = !t.done; return { ...t, done: newDone }; }
-        return t;
-      })
-    }));
+    setData(prev => {
+      const updated = {
+        ...prev,
+        tasks: prev.tasks.map(t => {
+          if (t.id === id) { newDone = !t.done; return { ...t, done: newDone }; }
+          return t;
+        })
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await updateItemInSheet('tasks', id, { done: newDone });
   };
 
   const deleteTask = async (id) => {
-    setData(prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== id) }));
+    setData(prev => {
+      const updated = { ...prev, tasks: prev.tasks.filter(t => t.id !== id) };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteItemFromSheet('tasks', id);
   };
 
   const addGoal = async (goal) => {
     const newGoal = { ...goal, id: Date.now(), done: false, progress: 0, createdAt: new Date().toISOString(), month: currentMonth };
-    setData(prev => ({ ...prev, goals: [...prev.goals, newGoal] }));
+    setData(prev => {
+      const updated = { ...prev, goals: [...prev.goals, newGoal] };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addItemToSheet('goals', goal, currentMonth);
   };
 
   const updateGoalProgress = async (id, progress) => {
     const done = progress >= 100;
-    setData(prev => ({
-      ...prev,
-      goals: prev.goals.map(g => g.id === id ? { ...g, progress, done } : g)
-    }));
+    setData(prev => {
+      const updated = {
+        ...prev,
+        goals: prev.goals.map(g => g.id === id ? { ...g, progress, done } : g)
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await updateItemInSheet('goals', id, { progress, done });
   };
 
   const toggleGoal = async (id) => {
     let newDone, newProgress;
-    setData(prev => ({
-      ...prev,
-      goals: prev.goals.map(g => {
-        if (g.id === id) {
-          newDone = !g.done;
-          newProgress = newDone ? 100 : g.progress;
-          return { ...g, done: newDone, progress: newProgress };
-        }
-        return g;
-      })
-    }));
+    setData(prev => {
+      const updated = {
+        ...prev,
+        goals: prev.goals.map(g => {
+          if (g.id === id) {
+            newDone = !g.done;
+            newProgress = newDone ? 100 : g.progress;
+            return { ...g, done: newDone, progress: newProgress };
+          }
+          return g;
+        })
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await updateItemInSheet('goals', id, { done: newDone, progress: newProgress });
   };
 
   const deleteGoal = async (id) => {
-    setData(prev => ({ ...prev, goals: prev.goals.filter(g => g.id !== id) }));
+    setData(prev => {
+      const updated = { ...prev, goals: prev.goals.filter(g => g.id !== id) };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteItemFromSheet('goals', id);
   };
 
   const addPayment = async (payment) => {
     const newPayment = { ...payment, id: Date.now(), done: false, createdAt: new Date().toISOString(), month: currentMonth };
-    setData(prev => ({ ...prev, payments: [...prev.payments, newPayment] }));
+    setData(prev => {
+      const updated = { ...prev, payments: [...prev.payments, newPayment] };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addItemToSheet('payments', payment, currentMonth);
   };
 
   const togglePayment = async (id) => {
     let newDone;
-    setData(prev => ({
-      ...prev,
-      payments: prev.payments.map(p => {
-        if (p.id === id) { newDone = !p.done; return { ...p, done: newDone }; }
-        return p;
-      })
-    }));
+    setData(prev => {
+      const updated = {
+        ...prev,
+        payments: prev.payments.map(p => {
+          if (p.id === id) { newDone = !p.done; return { ...p, done: newDone }; }
+          return p;
+        })
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await updateItemInSheet('payments', id, { done: newDone });
   };
 
   const deletePayment = async (id) => {
-    setData(prev => ({ ...prev, payments: prev.payments.filter(p => p.id !== id) }));
+    setData(prev => {
+      const updated = { ...prev, payments: prev.payments.filter(p => p.id !== id) };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteItemFromSheet('payments', id);
   };
 
   const addBirthday = async (birthday) => {
     const newBirthday = { ...birthday, id: Date.now(), createdAt: new Date().toISOString() };
-    setData(prev => ({ ...prev, birthdays: [...(prev.birthdays || []), newBirthday] }));
+    setData(prev => {
+      const updated = { ...prev, birthdays: [...(prev.birthdays || []), newBirthday] };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addBirthdayToSheet(birthday);
   };
 
   const deleteBirthday = async (id) => {
-    setData(prev => ({ ...prev, birthdays: (prev.birthdays || []).filter(b => b.id !== id) }));
+    setData(prev => {
+      const updated = { ...prev, birthdays: (prev.birthdays || []).filter(b => b.id !== id) };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteBirthdayFromSheet(id);
   };
 
