@@ -4,9 +4,6 @@ const isConfigured = () => {
   return GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL !== 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE';
 };
 
-/**
- * Helper: fetch with redirect handling for Google Apps Script
- */
 const gFetch = async (url, options = {}) => {
   const res = await fetch(url, { ...options, redirect: 'follow' });
   const text = await res.text();
@@ -23,7 +20,6 @@ export const setupSheets = async () => {
   try {
     return await gFetch(`${GOOGLE_SCRIPT_URL}?action=setup`);
   } catch (err) {
-    console.error('Setup error:', err);
     return { error: err.message };
   }
 };
@@ -31,7 +27,7 @@ export const setupSheets = async () => {
 export const getAllData = async (month) => {
   if (!isConfigured()) return null;
   try {
-    const url = month 
+    const url = month
       ? `${GOOGLE_SCRIPT_URL}?action=getAll&month=${encodeURIComponent(month)}`
       : `${GOOGLE_SCRIPT_URL}?action=getAll`;
     const json = await gFetch(url);
@@ -51,7 +47,6 @@ export const addItemToSheet = async (category, item, month) => {
       body: JSON.stringify({ category, item, month: month || getCurrentMonth() })
     });
   } catch (err) {
-    console.error('Add error:', err);
     return null;
   }
 };
@@ -61,7 +56,6 @@ export const deleteItemFromSheet = async (category, id) => {
   try {
     return await gFetch(`${GOOGLE_SCRIPT_URL}?action=delete&category=${category}&id=${id}`);
   } catch (err) {
-    console.error('Delete error:', err);
     return null;
   }
 };
@@ -74,7 +68,6 @@ export const updateItemInSheet = async (category, id, updates) => {
       body: JSON.stringify({ category, id, updates })
     });
   } catch (err) {
-    console.error('Update error:', err);
     return null;
   }
 };
@@ -86,7 +79,6 @@ export const getAvailableMonths = async () => {
     if (json && json.success) return json.months;
     return [getCurrentMonth()];
   } catch (err) {
-    console.error('Months error:', err);
     return [getCurrentMonth()];
   }
 };
@@ -96,7 +88,6 @@ export const createNewMonth = async (month) => {
   try {
     return await gFetch(`${GOOGLE_SCRIPT_URL}?action=createMonth&month=${encodeURIComponent(month)}`);
   } catch (err) {
-    console.error('Create month error:', err);
     return { error: err.message };
   }
 };
@@ -108,7 +99,6 @@ export const getPasswordFromSheet = async () => {
     if (json && json.success) return json.password;
     return null;
   } catch (err) {
-    console.error('Get password error:', err);
     return null;
   }
 };
@@ -118,20 +108,17 @@ export const savePasswordToSheet = async (password) => {
   try {
     return await gFetch(`${GOOGLE_SCRIPT_URL}?action=setPassword&password=${encodeURIComponent(password)}`);
   } catch (err) {
-    console.error('Save password error:', err);
     return null;
   }
 };
 
-// Birthday-specific functions (not month-based, permanent data)
 export const getAllBirthdays = async () => {
-  if (!isConfigured()) return null;
+  if (!isConfigured()) return [];
   try {
     const json = await gFetch(`${GOOGLE_SCRIPT_URL}?action=getBirthdays`);
     if (json && json.success) return json.data;
     return [];
   } catch (err) {
-    console.error('Get birthdays error:', err);
     return [];
   }
 };
@@ -144,7 +131,6 @@ export const addBirthdayToSheet = async (birthday) => {
       body: JSON.stringify({ birthday })
     });
   } catch (err) {
-    console.error('Add birthday error:', err);
     return null;
   }
 };
@@ -154,7 +140,6 @@ export const deleteBirthdayFromSheet = async (id) => {
   try {
     return await gFetch(`${GOOGLE_SCRIPT_URL}?action=deleteBirthday&id=${id}`);
   } catch (err) {
-    console.error('Delete birthday error:', err);
     return null;
   }
 };
