@@ -31,6 +31,7 @@ const defaultData = {
   birthdays: []
 };
 
+const LS_DATA_KEY   = 'rajlife_data';
 const LS_MONTH_KEY  = 'rajlife_month';
 const LS_MONTHS_KEY = 'rajlife_months';
 
@@ -48,7 +49,7 @@ const lsSet = (key, value) => {
 const SYNC_INTERVAL_MS = 30 * 1000;
 
 export function AppProvider({ children }) {
-  const [data, setData] = useState(defaultData);
+  const [data, setData] = useState(() => lsGet(LS_DATA_KEY, defaultData));
   const [currentMonth, setCurrentMonth] = useState(
     () => lsGet(LS_MONTH_KEY, getCurrentMonth())
   );
@@ -67,9 +68,9 @@ export function AppProvider({ children }) {
 
   const currentMonthRef = useRef(currentMonth);
   useEffect(() => { currentMonthRef.current = currentMonth; }, [currentMonth]);
-
   const syncIntervalRef = useRef(null);
 
+  // ── Password ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const loadPassword = async () => {
       const sheetPass = await getPasswordFromSheet();
@@ -85,39 +86,40 @@ export function AppProvider({ children }) {
   };
 
   const unlock = (inputPass) => {
-    if (inputPass === password) {
-      setIsLocked(false);
-      return true;
-    }
+    if (inputPass === password) { setIsLocked(false); return true; }
     return false;
   };
 
+  // ── Sync from Sheet ───────────────────────────────────────────────────────
   const syncFromSheet = useCallback(async (month) => {
     setSyncing(true);
     setSyncError(null);
     try {
       const targetMonth = (month || currentMonthRef.current).trim();
       const sheetData = await getAllData(targetMonth);
-
       if (sheetData) {
-        setData(prev => ({
-          ...prev,
-          finance: {
-            income:      sheetData.income      || [],
-            expenses:    sheetData.expenses    || [],
-            loans:       sheetData.loans       || [],
-            creditCards: sheetData.creditCards || [],
-            otherIncome: sheetData.otherIncome || []
-          },
-          tasks:    sheetData.tasks    || [],
-          goals:    sheetData.goals    || [],
-          payments: sheetData.payments || []
-        }));
+        setData(prev => {
+          const updated = {
+            ...prev,
+            finance: {
+              income:      sheetData.income      || [],
+              expenses:    sheetData.expenses    || [],
+              loans:       sheetData.loans       || [],
+              creditCards: sheetData.creditCards || [],
+              otherIncome: sheetData.otherIncome || []
+            },
+            tasks:    sheetData.tasks    || [],
+            goals:    sheetData.goals    || [],
+            payments: sheetData.payments || []
+          };
+          lsSet(LS_DATA_KEY, updated);
+          return updated;
+        });
         lsSet(LS_MONTH_KEY, targetMonth);
         setLastSynced(new Date().toLocaleTimeString('en-IN'));
         setSyncError(null);
       } else {
-        setSyncError('Sheet se connect nahi hua. Dobara try karo.');
+        setSyncError('Sheet se connect nahi hua.');
       }
     } catch (err) {
       setSyncError('Sync fail hua. Internet check karo.');
@@ -129,10 +131,15 @@ export function AppProvider({ children }) {
   const loadBirthdays = useCallback(async () => {
     const bdays = await getAllBirthdays();
     if (bdays) {
-      setData(prev => ({ ...prev, birthdays: bdays }));
+      setData(prev => {
+        const updated = { ...prev, birthdays: bdays };
+        lsSet(LS_DATA_KEY, updated);
+        return updated;
+      });
     }
   }, []);
 
+  // ── Init after unlock ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!isLocked) {
       const init = async () => {
@@ -167,6 +174,7 @@ export function AppProvider({ children }) {
     }
   }, [isLocked, syncFromSheet, loadBirthdays]);
 
+  // ── Reminders ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const today = new Date();
     const upcoming = (data.birthdays || []).filter(b => {
@@ -199,6 +207,7 @@ export function AppProvider({ children }) {
     setReminders(upcoming);
   }, [data.payments]);
 
+  // ── Month ─────────────────────────────────────────────────────────────────
   const changeMonth = async (month) => {
     const trimmedMonth = month.trim();
     setCurrentMonth(trimmedMonth);
@@ -210,107 +219,183 @@ export function AppProvider({ children }) {
     const trimmedMonth = month.trim();
     await createNewMonth(trimmedMonth);
     const months = await getAvailableMonths();
-    if (months) {
-      setAvailableMonths(months);
-      lsSet(LS_MONTHS_KEY, months);
-    }
+    if (months) { setAvailableMonths(months); lsSet(LS_MONTHS_KEY, months); }
     setCurrentMonth(trimmedMonth);
     lsSet(LS_MONTH_KEY, trimmedMonth);
     await syncFromSheet(trimmedMonth);
   };
 
+  // ── Finance ───────────────────────────────────────────────────────────────
   const addFinanceItem = async (category, item) => {
-    const result = await addItemToSheet(category, item, currentMonth);
-    await syncFromSheet(currentMonth);
-    return result;
+    const newItem = { ...item, id: Date.now(), createdAt: new Date().toISOString(), month: currentMonth };
+    // Pehle UI mein dikhao
+    setData(prev => {
+      const updated = {
+        ...prev,
+        finance: { ...prev.finance, [category]: [...prev.finance[category], newItem] }
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
+    // Phir Sheet mein save karo
+    await addItemToSheet(category, item, currentMonth);
   };
 
   const deleteFinanceItem = async (category, id) => {
+    setData(prev => {
+      const updated = {
+        ...prev,
+        finance: { ...prev.finance, [category]: prev.finance[category].filter(i => i.id !== id) }
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteItemFromSheet(category, id);
-    await syncFromSheet(currentMonth);
   };
 
+  // ── Tasks ─────────────────────────────────────────────────────────────────
   const addTask = async (task) => {
+    const newTask = { ...task, id: Date.now(), done: false, createdAt: new Date().toISOString(), month: currentMonth };
+    setData(prev => {
+      const updated = { ...prev, tasks: [...prev.tasks, newTask] };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addItemToSheet('tasks', task, currentMonth);
-    await syncFromSheet(currentMonth);
   };
 
   const toggleTask = async (id) => {
-    const task = data.tasks.find(t => t.id === id);
-    if (!task) return;
-    const newDone = !task.done;
-    setData(prev => ({
-      ...prev,
-      tasks: prev.tasks.map(t => t.id === id ? { ...t, done: newDone } : t)
-    }));
+    let newDone;
+    setData(prev => {
+      const updated = {
+        ...prev,
+        tasks: prev.tasks.map(t => {
+          if (t.id === id) { newDone = !t.done; return { ...t, done: newDone }; }
+          return t;
+        })
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await updateItemInSheet('tasks', id, { done: newDone });
   };
 
   const deleteTask = async (id) => {
+    setData(prev => {
+      const updated = { ...prev, tasks: prev.tasks.filter(t => t.id !== id) };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteItemFromSheet('tasks', id);
-    setData(prev => ({ ...prev, tasks: prev.tasks.filter(t => t.id !== id) }));
   };
 
+  // ── Goals ─────────────────────────────────────────────────────────────────
   const addGoal = async (goal) => {
+    const newGoal = { ...goal, id: Date.now(), done: false, progress: 0, createdAt: new Date().toISOString(), month: currentMonth };
+    setData(prev => {
+      const updated = { ...prev, goals: [...prev.goals, newGoal] };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addItemToSheet('goals', goal, currentMonth);
-    await syncFromSheet(currentMonth);
   };
 
   const updateGoalProgress = async (id, progress) => {
     const done = progress >= 100;
-    setData(prev => ({
-      ...prev,
-      goals: prev.goals.map(g => g.id === id ? { ...g, progress, done } : g)
-    }));
+    setData(prev => {
+      const updated = {
+        ...prev,
+        goals: prev.goals.map(g => g.id === id ? { ...g, progress, done } : g)
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await updateItemInSheet('goals', id, { progress, done });
   };
 
   const toggleGoal = async (id) => {
-    const goal = data.goals.find(g => g.id === id);
-    if (!goal) return;
-    const newDone = !goal.done;
-    const newProgress = newDone ? 100 : goal.progress;
-    setData(prev => ({
-      ...prev,
-      goals: prev.goals.map(g => g.id === id ? { ...g, done: newDone, progress: newProgress } : g)
-    }));
+    let newDone, newProgress;
+    setData(prev => {
+      const updated = {
+        ...prev,
+        goals: prev.goals.map(g => {
+          if (g.id === id) {
+            newDone = !g.done;
+            newProgress = newDone ? 100 : g.progress;
+            return { ...g, done: newDone, progress: newProgress };
+          }
+          return g;
+        })
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await updateItemInSheet('goals', id, { done: newDone, progress: newProgress });
   };
 
   const deleteGoal = async (id) => {
+    setData(prev => {
+      const updated = { ...prev, goals: prev.goals.filter(g => g.id !== id) };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteItemFromSheet('goals', id);
-    setData(prev => ({ ...prev, goals: prev.goals.filter(g => g.id !== id) }));
   };
 
+  // ── Payments ──────────────────────────────────────────────────────────────
   const addPayment = async (payment) => {
+    const newPayment = { ...payment, id: Date.now(), done: false, createdAt: new Date().toISOString(), month: currentMonth };
+    setData(prev => {
+      const updated = { ...prev, payments: [...prev.payments, newPayment] };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addItemToSheet('payments', payment, currentMonth);
-    await syncFromSheet(currentMonth);
   };
 
   const togglePayment = async (id) => {
-    const payment = data.payments.find(p => p.id === id);
-    if (!payment) return;
-    const newDone = !payment.done;
-    setData(prev => ({
-      ...prev,
-      payments: prev.payments.map(p => p.id === id ? { ...p, done: newDone } : p)
-    }));
+    let newDone;
+    setData(prev => {
+      const updated = {
+        ...prev,
+        payments: prev.payments.map(p => {
+          if (p.id === id) { newDone = !p.done; return { ...p, done: newDone }; }
+          return p;
+        })
+      };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await updateItemInSheet('payments', id, { done: newDone });
   };
 
   const deletePayment = async (id) => {
+    setData(prev => {
+      const updated = { ...prev, payments: prev.payments.filter(p => p.id !== id) };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteItemFromSheet('payments', id);
-    setData(prev => ({ ...prev, payments: prev.payments.filter(p => p.id !== id) }));
   };
 
+  // ── Birthdays ─────────────────────────────────────────────────────────────
   const addBirthday = async (birthday) => {
+    const newBirthday = { ...birthday, id: Date.now(), createdAt: new Date().toISOString() };
+    setData(prev => {
+      const updated = { ...prev, birthdays: [...(prev.birthdays || []), newBirthday] };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await addBirthdayToSheet(birthday);
-    await loadBirthdays();
   };
 
   const deleteBirthday = async (id) => {
+    setData(prev => {
+      const updated = { ...prev, birthdays: (prev.birthdays || []).filter(b => b.id !== id) };
+      lsSet(LS_DATA_KEY, updated);
+      return updated;
+    });
     await deleteBirthdayFromSheet(id);
-    setData(prev => ({ ...prev, birthdays: (prev.birthdays || []).filter(b => b.id !== id) }));
   };
 
   return (
